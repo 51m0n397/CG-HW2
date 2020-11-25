@@ -801,7 +801,57 @@ static vec4f shade_path(const pathtrace_scene* scene, const ray3f& ray_,
 static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
     rng_state& rng, const pathtrace_params& params) {
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return {0, 0, 0, 0};
+
+  //<init>
+  auto l      = zero3f;
+  auto weight = vec3f{1, 1, 1};
+  auto ray    = ray_;
+
+  for (auto bounce = 0; bounce < params.bounces; bounce++) {
+    //<intersection and environment>
+    auto isec = intersect_scene_bvh(scene, ray);
+    if (!isec.hit) {
+      l += weight * eval_environment(scene, ray);
+      break;
+    }
+
+    auto outgoing = -ray.d;
+    auto incoming = zero3f;
+    auto instance = scene->instances[isec.instance];
+    auto element  = isec.element;
+    auto uv       = isec.uv;
+
+    //<eval point and material>
+    auto position = eval_position(instance, element, uv);
+    auto normal   = eval_shading_normal(instance, element, uv, outgoing);
+    auto emission = eval_emission(instance, element, uv, normal, outgoing);
+    auto brdf     = eval_brdf(instance, element, uv, normal, outgoing);
+
+    //<emission>
+    l += weight * eval_emission(emission, normal, outgoing);
+
+    if (!is_delta(brdf)) {
+      //<handle smooth>
+      incoming = sample_brdfcos(
+          brdf, normal, outgoing, rand1f(rng), rand2f(rng));
+      weight *= eval_brdfcos(brdf, normal, incoming, outgoing) /
+                sample_brdfcos_pdf(brdf, normal, incoming, outgoing);
+    } else {
+      //<handle delta>
+      incoming = sample_delta(brdf, normal, outgoing, rand1f(rng));
+      weight *= eval_delta(brdf, normal, incoming, outgoing) /
+                sample_delta_pdf(brdf, normal, incoming, outgoing);
+    }
+
+    //<russian roulette>
+    if (rand1f(rng) >= min(1.0f, max(weight))) break;
+    weight *= 1 / min(1.0f, max(weight));
+
+    //<recurse>
+    ray = {position, incoming};
+  }
+
+  return {l.x, l.y, l.z, 1};
 }
 
 // Eyelight for quick previewing.
