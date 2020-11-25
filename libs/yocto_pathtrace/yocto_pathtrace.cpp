@@ -104,7 +104,21 @@ static vec4f eval_texture(const pathtrace_texture* texture, const vec2f& uv,
 static ray3f eval_camera(const pathtrace_camera* camera, const vec2f& image_uv,
     const vec2f& lens_uv) {
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return {};
+  // point on the image plane
+  auto q = vec3f{camera->film.x * (0.5f - image_uv.x),
+      camera->film.y * (image_uv.y - 0.5f), camera->lens};
+  // ray direction through the lens center
+  auto dc = -normalize(q);
+  // point on the lens
+  auto e = vec3f{
+      lens_uv.x * camera->aperture / 2, lens_uv.y * camera->aperture / 2, 0};
+  // point on the focus plane
+  auto p = dc * camera->focus / abs(dc.z);
+  // correct ray direction to account for camera focusing
+  auto d = normalize(p - e);
+  // done
+  return ray3f{
+      transform_point(camera->frame, e), transform_direction(camera->frame, d)};
 }
 
 // Samples a camera ray at pixel ij of an image of size size with puv and luv
@@ -112,7 +126,8 @@ static ray3f eval_camera(const pathtrace_camera* camera, const vec2f& image_uv,
 static ray3f sample_camera(const pathtrace_camera* camera, const vec2i& ij,
     const vec2i& size, const vec2f& puv, const vec2f& luv) {
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return {};
+  auto uv = vec2f{(ij.x + puv.x) / size.x, (ij.y + puv.y) / size.y};
+  return eval_camera(camera, uv, sample_disk(luv));
 }
 
 // Eval position
