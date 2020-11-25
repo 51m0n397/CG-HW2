@@ -731,7 +731,21 @@ static vec3f eval_brdfcos(const pathtrace_brdf& brdf, const vec3f& normal,
   if (brdf.roughness == 0) return zero3f;
 
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return {0, 0, 0};
+  auto brdfcos = zero3f;
+  if (brdf.diffuse != zero3f)
+    brdfcos += brdf.diffuse *
+               eval_diffuse_reflection(normal, outgoing, incoming);
+  if (brdf.specular != zero3f)
+    brdfcos += brdf.specular * eval_microfacet_reflection(brdf.ior,
+                                   brdf.roughness, normal, outgoing, incoming);
+  if (brdf.metal != zero3f)
+    brdfcos += brdf.metal * eval_microfacet_reflection(brdf.meta, brdf.metak,
+                                brdf.roughness, normal, outgoing, incoming);
+  if (brdf.transmission != zero3f)
+    brdfcos += brdf.transmission * eval_microfacet_transmission(brdf.ior,
+                                       brdf.roughness, normal, outgoing,
+                                       incoming);
+  return brdfcos;
 }
 
 static vec3f eval_delta(const pathtrace_brdf& brdf, const vec3f& normal,
@@ -748,7 +762,30 @@ static vec3f sample_brdfcos(const pathtrace_brdf& brdf, const vec3f& normal,
   if (brdf.roughness == 0) return zero3f;
 
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return {0, 0, 0};
+  auto cdf = 0.0f;
+  if (brdf.diffuse_pdf) {
+    cdf += brdf.diffuse_pdf;
+    if (rnl < cdf) return sample_diffuse_reflection(normal, outgoing, rn);
+  }
+  if (brdf.specular_pdf) {
+    cdf += brdf.specular_pdf;
+    if (rnl < cdf)
+      return sample_microfacet_reflection(
+          brdf.ior, brdf.roughness, normal, outgoing, rn);
+  }
+  if (brdf.metal_pdf) {
+    cdf += brdf.metal_pdf;
+    if (rnl < cdf)
+      return sample_microfacet_reflection(
+          brdf.meta, brdf.metak, brdf.roughness, normal, outgoing, rn);
+  }
+  if (brdf.transmission_pdf) {
+    cdf += brdf.transmission_pdf;
+    if (rnl < cdf)
+      return sample_microfacet_transmission(
+          brdf.ior, brdf.roughness, normal, outgoing, rn);
+  }
+  return zero3f;
 }
 
 static vec3f sample_delta(const pathtrace_brdf& brdf, const vec3f& normal,
@@ -765,7 +802,26 @@ static float sample_brdfcos_pdf(const pathtrace_brdf& brdf, const vec3f& normal,
   if (brdf.roughness == 0) return 0;
 
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return 0;
+  auto pdf = 0.0f;
+  if (brdf.diffuse_pdf) {
+    pdf += brdf.diffuse_pdf *
+           sample_diffuse_reflection_pdf(normal, outgoing, incoming);
+  }
+  if (brdf.specular_pdf) {
+    pdf += brdf.specular_pdf * sample_microfacet_reflection_pdf(brdf.ior,
+                                   brdf.roughness, normal, outgoing, incoming);
+  }
+  if (brdf.metal_pdf) {
+    pdf += brdf.metal_pdf * sample_microfacet_reflection_pdf(brdf.meta,
+                                brdf.metak, brdf.roughness, normal, outgoing,
+                                incoming);
+  }
+  if (brdf.transmission_pdf) {
+    pdf += brdf.transmission_pdf * sample_microfacet_transmission_pdf(brdf.ior,
+                                       brdf.roughness, normal, outgoing,
+                                       incoming);
+  }
+  return pdf;
 }
 
 static float sample_delta_pdf(const pathtrace_brdf& brdf, const vec3f& normal,
