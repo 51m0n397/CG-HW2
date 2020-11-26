@@ -904,7 +904,75 @@ static float sample_lights_pdf(const pathtrace_scene* scene,
 static vec4f shade_path(const pathtrace_scene* scene, const ray3f& ray_,
     rng_state& rng, const pathtrace_params& params) {
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return {0, 0, 0, 0};
+  //<init>
+  auto radiance = zero3f;
+  auto weight   = vec3f{1, 1, 1};
+  auto ray      = ray_;
+  auto hit      = false;
+
+  for (auto bounce = 0; bounce < params.bounces; bounce++) {
+    // intersect next point
+    auto intersection = intersect_scene_bvh(scene, ray);
+    if (!intersection.hit) {
+      radiance += weight * eval_environment(scene, ray);
+      break;
+    }
+
+    // prepare shading point
+    auto outgoing = -ray.d;
+    auto instance = scene->instances[intersection.instance];
+    auto element  = intersection.element;
+    auto uv       = intersection.uv;
+
+    //<eval point and material>
+    auto position = eval_position(instance, element, uv);
+    auto normal   = eval_shading_normal(instance, element, uv, outgoing);
+    auto emission = eval_emission(instance, element, uv, normal, outgoing);
+    auto brdf     = eval_brdf(instance, element, uv, normal, outgoing);
+
+    // handle opacity
+    if (brdf.opacity < 1 && rand1f(rng) >= brdf.opacity) {
+      ray = {position + ray.d * 1e-2f, ray.d};
+      bounce -= 1;
+      continue;
+    }
+    hit = true;
+
+    //<emission>
+    radiance += weight * eval_emission(emission, normal, outgoing);
+
+    auto incoming = zero3f;
+    if (!is_delta(brdf)) {
+      if (rand1f(rng) < 0.5f) {
+        incoming = sample_brdfcos(
+            brdf, normal, outgoing, rand1f(rng), rand2f(rng));
+      } else {
+        incoming = sample_lights(
+            scene, position, rand1f(rng), rand1f(rng), rand2f(rng));
+      }
+      weight *= eval_brdfcos(brdf, normal, outgoing, incoming) /
+                (0.5f * sample_brdfcos_pdf(brdf, normal, outgoing, incoming) +
+                    0.5f * sample_lights_pdf(scene, position, incoming));
+    } else {
+      incoming = sample_delta(brdf, normal, outgoing, rand1f(rng));
+      weight *= eval_delta(brdf, normal, outgoing, incoming) /
+                sample_delta_pdf(brdf, normal, outgoing, incoming);
+    }
+
+    if (weight == zero3f || !isfinite(weight)) break;
+
+    //<russian roulette>
+    if (bounce > 3) {
+      auto rr_prob = min((float)0.99, max(weight));
+      if (rand1f(rng) >= rr_prob) break;
+      weight *= 1 / rr_prob;
+    }
+
+    //<recurse>
+    ray = {position, incoming};
+  }
+
+  return {radiance.x, radiance.y, radiance.z, hit ? 1.0f : 0.0f};
 }
 
 // Recursive path tracing.
