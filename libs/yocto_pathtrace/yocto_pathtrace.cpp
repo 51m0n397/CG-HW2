@@ -864,7 +864,7 @@ static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
   auto ray      = ray_;
   auto hit      = false;
 
-  for (auto bounce = 0; bounce < max(params.bounces, 4); bounce++) {
+  for (auto bounce = 0; bounce < params.bounces; bounce++) {
     // intersect next point
     auto intersection = intersect_scene_bvh(scene, ray);
     if (!intersection.hit) {
@@ -912,8 +912,11 @@ static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
     if (weight == zero3f || !isfinite(weight)) break;
 
     //<russian roulette>
-    if (rand1f(rng) >= min(1.0f, max(weight))) break;
-    weight *= 1 / min(1.0f, max(weight));
+    if (bounce > 3) {
+      auto rr_prob = min((float)0.99, max(weight));
+      if (rand1f(rng) >= rr_prob) break;
+      weight *= 1 / rr_prob;
+    }
 
     //<recurse>
     ray = {position, incoming};
