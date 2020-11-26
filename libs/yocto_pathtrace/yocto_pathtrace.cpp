@@ -903,6 +903,8 @@ static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
                 sample_delta_pdf(brdf, normal, outgoing, incoming);
     }
 
+    if (weight == zero3f || !isfinite(weight)) break;
+
     //<russian roulette>
     if (rand1f(rng) >= min(1.0f, max(weight))) break;
     weight *= 1 / min(1.0f, max(weight));
