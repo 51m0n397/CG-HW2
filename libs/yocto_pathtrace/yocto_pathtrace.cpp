@@ -753,7 +753,23 @@ static vec3f eval_delta(const pathtrace_brdf& brdf, const vec3f& normal,
   if (brdf.roughness != 0) return zero3f;
 
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return {0, 0, 0};
+  auto brdfcos = zero3f;
+
+  if (brdf.specular != zero3f) {
+    brdfcos += brdf.specular *
+               eval_delta_reflection(brdf.ior, normal, outgoing, incoming);
+  }
+  if (brdf.metal != zero3f) {
+    brdfcos += brdf.metal * eval_delta_reflection(brdf.meta, brdf.metak, normal,
+                                outgoing, incoming);
+  }
+
+  if (brdf.transmission != zero3f) {
+    brdfcos += brdf.transmission *
+               eval_delta_transmission(brdf.ior, normal, outgoing, incoming);
+  }
+
+  return brdfcos;
 }
 
 // Picks a direction based on the BRDF
@@ -793,7 +809,32 @@ static vec3f sample_delta(const pathtrace_brdf& brdf, const vec3f& normal,
   if (brdf.roughness != 0) return zero3f;
 
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return {0, 0, 0};
+  // keep a weight sum to pick a lobe
+  auto cdf = 0.0f;
+  cdf += brdf.diffuse_pdf;
+
+  if (brdf.specular_pdf != 0) {
+    cdf += brdf.specular_pdf;
+    if (rnl < cdf) {
+      return sample_delta_reflection(brdf.ior, normal, outgoing);
+    }
+  }
+
+  if (brdf.metal_pdf != 0) {
+    cdf += brdf.metal_pdf;
+    if (rnl < cdf) {
+      return sample_delta_reflection(brdf.meta, brdf.metak, normal, outgoing);
+    }
+  }
+
+  if (brdf.transmission_pdf != 0) {
+    cdf += brdf.transmission_pdf;
+    if (rnl < cdf) {
+      return sample_delta_transmission(brdf.ior, normal, outgoing);
+    }
+  }
+
+  return zero3f;
 }
 
 // Compute the weight for sampling the BRDF
@@ -829,7 +870,20 @@ static float sample_delta_pdf(const pathtrace_brdf& brdf, const vec3f& normal,
   if (brdf.roughness != 0) return 0;
 
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return 0;
+  auto pdf = 0.0f;
+  if (brdf.specular_pdf != 0) {
+    pdf += brdf.specular_pdf *
+           sample_delta_reflection_pdf(brdf.ior, normal, outgoing, incoming);
+  }
+  if (brdf.metal_pdf != 0) {
+    pdf += brdf.metal_pdf * sample_delta_reflection_pdf(brdf.meta, brdf.metak,
+                                normal, outgoing, incoming);
+  }
+  if (brdf.transmission_pdf != 0) {
+    pdf += brdf.transmission_pdf *
+           sample_delta_transmission_pdf(brdf.ior, normal, outgoing, incoming);
+  }
+  return pdf;
 }
 
 // Sample lights wrt solid angle
