@@ -884,6 +884,12 @@ static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
     auto emission = eval_emission(instance, element, uv, normal, outgoing);
     auto brdf     = eval_brdf(instance, element, uv, normal, outgoing);
 
+    // handle opacity
+    if (brdf.opacity < 1 && rand1f(rng) >= brdf.opacity) {
+      ray = {position + ray.d * 1e-2f, ray.d};
+      bounce -= 1;
+      continue;
+    }
     hit = true;
 
     //<emission>
