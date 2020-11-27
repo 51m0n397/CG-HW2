@@ -890,14 +890,80 @@ static float sample_delta_pdf(const pathtrace_brdf& brdf, const vec3f& normal,
 static vec3f sample_lights(const pathtrace_scene* scene, const vec3f& position,
     float rl, float rel, const vec2f& ruv) {
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return {0, 0, 0};
-}
+  auto lid   = sample_uniform(scene->lights.size(), rl);
+  auto light = scene->lights[lid];
+  if (light->instance) {
+    //<handle object>
+    auto tid = sample_discrete_cdf(light->cdf, rel);
+    auto uv  = sample_triangle(ruv);
+    auto lp  = eval_position(light->instance, tid, uv);
+    return normalize(lp - position);
+  } else if (light->environment) {
+    //<handle environment>
+    if (light->environment->emission_tex) {
+      auto texture = light->environment->emission_tex;
+      auto tid     = sample_discrete_cdf(light->cdf, rel);
+      auto size    = texture_size(texture);
+      auto uv      = vec2f{((tid % size.x) + 0.5f) / size.x,
+          ((tid / size.x) + 0.5f) / size.y};  // puv?
+      return transform_direction(light->environment->frame,
+          {cos(uv.x * 2 * pif) * sin(uv.y * pif), cos(uv.y * pif),
+              sin(uv.x * 2 * pif) * sin(uv.y * pif)});
+    } else {
+      return sample_sphere(ruv);
+    }
+  } else {
+    return zero3f;
+  }
+}  // namespace yocto
 
 // Sample lights pdf
 static float sample_lights_pdf(const pathtrace_scene* scene,
     const vec3f& position, const vec3f& direction) {
   // YOUR CODE GOES HERE ----------------------------------------------------
-  return 0;
+  auto pdf = 0.0f;
+  for (auto light : scene->lights) {
+    if (light->instance) {
+      //<handle object>
+      auto lpdf = 0.0f;
+      auto np   = position;
+      for (auto bounce = 0; bounce < 100; bounce++) {
+        auto isec = intersect_instance_bvh(light->instance, {np, direction});
+        if (!isec.hit) break;
+        // compute pdf of this triangle
+        auto lp = eval_position(light->instance, isec.element, isec.uv);
+        auto ln = eval_element_normal(light->instance, isec.element);
+        // prob triangle * area triangle = area triangle mesh
+        auto area = light->cdf.back();
+        lpdf += distance_squared(lp, position) /
+                (abs(dot(ln, direction)) * area);
+        np = lp + direction * 1e-3f;  // continue ray
+      }
+      pdf += lpdf;
+    } else if (light->environment) {
+      //<handle environment>
+      if (light->environment->emission_tex) {
+        auto texture = light->environment->emission_tex;
+        auto size    = texture_size(texture);
+        auto wl      = transform_direction(
+            inverse(light->environment->frame), direction);
+        auto texcoord = vec2f{atan2(wl.z, wl.x) / (2 * pif),
+            acos(clamp(wl.y, -1.0f, 1.0f)) / pif};
+        if (texcoord.x < 0) texcoord.x += 1;
+        auto i    = clamp((int)(texcoord.x * size.x), 0, size.x - 1);
+        auto j    = clamp((int)(texcoord.y * size.y), 0, size.y - 1);
+        auto prob = sample_discrete_cdf_pdf(light->cdf, j * size.x + i) /
+                    light->cdf.back();
+        auto angle = (2 * pif / size.x) * (pif / size.y) *
+                     sin(pif * (j + 0.5f) / size.y);
+        pdf += prob / angle;
+      } else {
+        pdf += 1 / (4 * pif);
+      }
+    }
+  }
+  pdf *= sample_uniform_pdf(scene->lights.size());
+  return pdf;
 }
 
 // Path tracing.
