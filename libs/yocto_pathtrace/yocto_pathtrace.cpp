@@ -1075,6 +1075,127 @@ static vec4f shade_path(const pathtrace_scene* scene, const ray3f& ray_,
   return {radiance.x, radiance.y, radiance.z, hit ? 1.0f : 0.0f};
 }
 
+static vec4f shade_albedo(const pathtrace_scene* scene, const ray3f& ray_,
+    rng_state& rng, const pathtrace_params& params, int bounce) {
+  auto ray = ray_;
+
+  auto intersection = intersect_scene_bvh(scene, ray);
+  if (!intersection.hit) {
+    auto radiance = eval_environment(scene, ray);
+    return {radiance.x, radiance.y, radiance.z, 1};
+  }
+
+  // prepare shading point
+  auto outgoing = -ray.d;
+  auto instance = scene->instances[intersection.instance];
+  auto element  = intersection.element;
+  auto uv       = intersection.uv;
+  auto material = scene->instances[intersection.instance]->material;
+  auto position = eval_position(instance, element, uv);
+  auto normal   = eval_shading_normal(instance, element, uv, outgoing);
+  auto texcoord = eval_texcoord(instance, element, uv);
+  auto emission = eval_emission(instance, element, uv, normal, outgoing);
+  auto brdf     = eval_brdf(instance, element, uv, normal, outgoing);
+
+  if (emission != zero3f) {
+    return {emission.x, emission.y, emission.z, 1};
+  }
+
+  auto albedo = material->color *
+                xyz(eval_texture(material->color_tex, texcoord, false));
+
+  // handle opacity
+  if (brdf.opacity < 1.0f) {
+    auto blend_albedo = shade_albedo(
+        scene, ray3f{position + ray.d * 1e-2f, ray.d}, rng, params, bounce);
+    return lerp(
+        blend_albedo, vec4f{albedo.x, albedo.y, albedo.z, 1}, brdf.opacity);
+  }
+
+  if (brdf.roughness < 0.05 && bounce < 5) {
+    if (brdf.transmission != zero3f && material->thin) {
+      auto incoming     = -outgoing;
+      auto trans_albedo = shade_albedo(
+          scene, ray3f{position, incoming}, rng, params, bounce + 1);
+
+      incoming         = reflect(outgoing, normal);
+      auto spec_albedo = shade_albedo(
+          scene, ray3f{position, incoming}, rng, params, bounce + 1);
+
+      auto fresnel = fresnel_dielectric(material->ior, outgoing, normal);
+      auto dielectric_albedo = lerp(trans_albedo, spec_albedo, fresnel);
+      return dielectric_albedo * vec4f{albedo.x, albedo.y, albedo.z, 1};
+    } else if (brdf.metal != zero3f) {
+      auto incoming    = reflect(outgoing, normal);
+      auto refl_albedo = shade_albedo(
+          scene, ray3f{position, incoming}, rng, params, bounce + 1);
+      return refl_albedo * vec4f{albedo.x, albedo.y, albedo.z, 1};
+    }
+  }
+
+  return {albedo.x, albedo.y, albedo.z, 1};
+}
+
+static vec4f shade_albedo(const pathtrace_scene* scene, const ray3f& ray_,
+    rng_state& rng, const pathtrace_params& params) {
+  auto albedo = shade_albedo(scene, ray_, rng, params, 0);
+  return clamp(albedo, 0.0, 1.0);
+}
+
+static vec4f shade_normal(const pathtrace_scene* scene, const ray3f& ray_,
+    rng_state& rng, const pathtrace_params& params, int bounce) {
+  auto ray = ray_;
+
+  auto intersection = intersect_scene_bvh(scene, ray);
+  if (!intersection.hit) {
+    return {0, 0, 0, 0};
+  }
+
+  // prepare shading point
+  auto outgoing = -ray.d;
+  auto instance = scene->instances[intersection.instance];
+  auto element  = intersection.element;
+  auto uv       = intersection.uv;
+
+  //<eval point and material>
+  auto position = eval_position(instance, element, uv);
+  auto normal   = eval_shading_normal(instance, element, uv, outgoing);
+  auto brdf     = eval_brdf(instance, element, uv, normal, outgoing);
+  auto material = scene->instances[intersection.instance]->material;
+
+  if (brdf.opacity < 1.0f) {
+    auto normal = shade_normal(
+        scene, ray3f{position + ray.d * 1e-2f, ray.d}, rng, params, bounce);
+    return lerp(normal, normal, brdf.opacity);
+  }
+
+  if (brdf.roughness < 0.05f && bounce < 5) {
+    if (brdf.transmission != zero3f && material->thin) {
+      auto incoming   = -outgoing;
+      auto trans_norm = shade_normal(
+          scene, ray3f{position, incoming}, rng, params, bounce + 1);
+
+      incoming       = reflect(outgoing, normal);
+      auto spec_norm = shade_normal(
+          scene, ray3f{position, incoming}, rng, params, bounce + 1);
+
+      auto fresnel = fresnel_dielectric(material->ior, outgoing, normal);
+      return lerp(trans_norm, spec_norm, fresnel);
+    } else if (brdf.metal != zero3f) {
+      auto incoming = reflect(outgoing, normal);
+      return shade_normal(
+          scene, ray3f{position, incoming}, rng, params, bounce + 1);
+    }
+  }
+
+  return {normal.x, normal.y, normal.z, 1};
+}
+
+static vec4f shade_normal(const pathtrace_scene* scene, const ray3f& ray_,
+    rng_state& rng, const pathtrace_params& params) {
+  return shade_normal(scene, ray_, rng, params, 0);
+}
+
 // Recursive path tracing.
 static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
     rng_state& rng, const pathtrace_params& params) {
@@ -1212,6 +1333,8 @@ static pathtrace_shader_func get_shader(const pathtrace_params& params) {
     case pathtrace_shader_type::naive: return shade_naive;
     case pathtrace_shader_type::path: return shade_path;
     case pathtrace_shader_type::eyelight: return shade_eyelight;
+    case pathtrace_shader_type::normal: return shade_normal;
+    case pathtrace_shader_type::albedo: return shade_albedo;
     default: {
       throw std::runtime_error("sampler unknown");
       return nullptr;

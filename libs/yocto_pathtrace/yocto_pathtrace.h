@@ -283,6 +283,8 @@ enum struct pathtrace_shader_type {
   naive,     // naive path tracing
   path,      // path tracing with mis
   eyelight,  // eyelight rendering
+  normal,
+  albedo
 };
 
 // Default trace seed
@@ -300,7 +302,8 @@ struct pathtrace_params {
   int                   pratio     = 8;
 };
 
-const auto pathtrace_shader_names = vector<string>{"naive", "path", "eyelight"};
+const auto pathtrace_shader_names = vector<string>{
+    "naive", "path", "eyelight", "normal", "albedo"};
 
 // Progress report callback
 using progress_callback =
